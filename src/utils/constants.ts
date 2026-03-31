@@ -1,0 +1,10 @@
+export const APP_NAME = "MoeCli";
+export const APP_DIR_NAME = ".moecli";
+export const APP_CONFIG_FILE = "settings.json";
+export const APP_SECRETS_FILE = "secrets.json";
+export const APP_CACHE_DIR = "cache";
+export const APP_AGENTS_DIR = "agents";
+export const APP_WORKTREE_DIR = "worktrees";
+export const DEFAULT_MAX_TOOL_TURNS = 8;
+export const DEFAULT_TASK_PLANNING_MAX_TOOL_TURNS = 24;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
