@@ -12,6 +12,7 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [
   { command: "/", description: "show the command cheat sheet" },
   { command: "/help", description: "show the command list" },
   { command: "/status", description: "show current session details" },
+  { command: "/superadmin", description: "manage risky-tool approval grants" },
   { command: "/providers", description: "add, edit, delete, or switch provider profiles" },
   { command: "/model", description: "pick a model or set one directly with /model <id>" },
   { command: "/mode", description: "switch between Chat & Edit mode and Task mode" },

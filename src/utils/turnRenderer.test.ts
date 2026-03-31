@@ -45,6 +45,23 @@ describe("turnRenderer helpers", () => {
     ).toBe('10 results for "codex pricing"');
   });
 
+  it("summarizes permission-required tool errors cleanly", () => {
+    expect(
+      summarizeToolResult(
+        {
+          id: "tool-perm",
+          name: "shell",
+          argumentsText: "{}",
+        },
+        JSON.stringify({
+          status: "permission_required",
+          tool: "shell",
+        }),
+        true,
+      ),
+    ).toBe("permission required");
+  });
+
   it("falls back to regex extraction for truncated search payloads", () => {
     expect(
       summarizeToolResult(
@@ -124,6 +141,33 @@ describe("turnRenderer helpers", () => {
         }),
       ),
     ).toBe("plan approved");
+  });
+
+  it("summarizes permission grant tool calls and results", () => {
+    expect(
+      summarizeToolCall({
+        id: "tool-4",
+        name: "grant_permissions",
+        argumentsText: JSON.stringify({
+          scope: "shell-prefix",
+          shellPrefix: "mkdir",
+        }),
+      }),
+    ).toBe("shell-prefix mkdir");
+
+    expect(
+      summarizeToolResult(
+        {
+          id: "tool-4",
+          name: "grant_permissions",
+          argumentsText: "{}",
+        },
+        JSON.stringify({
+          status: "updated",
+          scope: "shell-prefix",
+        }),
+      ),
+    ).toBe("permissions updated");
   });
 
   it("renders the latest task phase for each streamed segment", () => {

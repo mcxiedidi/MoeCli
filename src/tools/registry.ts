@@ -29,6 +29,15 @@ import { getSettings } from "../config/settings.js";
 import { getProfileSecrets, setProfileSecrets } from "../config/secrets.js";
 import { BrowserSession } from "../browser/session.js";
 import { AgentManager } from "../agents/manager.js";
+import {
+  buildToolApprovalRequest,
+  clearToolPermissionState,
+  consumeToolCallApproval,
+  isApprovalRequiredTool,
+  listApprovalRequiredTools,
+  type ToolApprovalRequest,
+  type ToolPermissionState,
+} from "./permissions.js";
 
 const execAsync = promisify(exec);
 const SEARCH_SECRET_PROFILE_ID = "__moecli_search__";
@@ -40,6 +49,7 @@ const PLANNING_TOOL_NAMES = new Set([
   "browser_snapshot",
   "browser_open",
   "request_user_input",
+  "grant_permissions",
   "task_submit_plan",
 ]);
 const NON_TASK_TOOL_NAMES = new Set(["task_submit_plan"]);
@@ -52,6 +62,7 @@ export interface ToolExecutionContext {
   taskState?: TaskModeState | undefined;
   browser: BrowserSession;
   agents: AgentManager;
+  permissions?: ToolPermissionState | undefined;
   interactive?: {
     requestUserInput?: (
       request: UserInputRequest,
@@ -184,6 +195,77 @@ function buildUserInputAnswersById(result: UserInputResult): UserInputResult["an
   }, {});
 }
 
+function buildPermissionRequiredResult(
+  request: ToolApprovalRequest,
+): ToolExecutionResult {
+  const suggestedOptions = [
+    {
+      label: "Allow once",
+      description: "Only allow this risky action one time.",
+    },
+    {
+      label: "Allow this tool for the session",
+      description: `Keep allowing ${request.toolName} until the session ends.`,
+    },
+    ...(request.toolName === "shell" && request.shellCommandPrefix
+      ? [
+          {
+            label: `Allow "${request.shellCommandPrefix}" commands`,
+            description:
+              "Keep allowing this shell command prefix for the session.",
+          },
+        ]
+      : []),
+    {
+      label: "Deny",
+      description: "Do not allow this risky action right now.",
+    },
+  ];
+
+  return {
+    output: serializeStructuredResult({
+      status: "permission_required",
+      tool: request.toolName,
+      action: request.summary,
+      message:
+        "Ask the user with request_user_input which permission scope to grant, then call grant_permissions before retrying this tool.",
+      suggested_scopes:
+        request.toolName === "shell" && request.shellCommandPrefix
+          ? ["once", "tool", "shell-prefix", "session"]
+          : ["once", "tool", "session"],
+      ...(request.commandText ? { command_text: request.commandText } : {}),
+      ...(request.shellCommandPrefix
+        ? { shell_prefix: request.shellCommandPrefix }
+        : {}),
+      suggested_question: {
+        header: "Permission",
+        id: "permission_scope",
+        question: `I need permission before I can continue: ${request.summary}. Which scope should I use?`,
+        options: suggestedOptions,
+      },
+      ...(request.toolName === "agent_spawn"
+        ? {
+            note:
+              "A spawned sub-agent runs autonomously inside its own worker process because it cannot ask the user for follow-up permission prompts.",
+          }
+        : {}),
+      superadmin_hint:
+        "If the user wants broad access without repeated questions, tell them to use /superadmin.",
+    }),
+    isError: true,
+  };
+}
+
+function requirePermissionState(
+  state: ToolPermissionState | undefined,
+): ToolPermissionState {
+  if (!state) {
+    throw new Error("Permission state is unavailable in this session.");
+  }
+
+  return state;
+}
+
 export async function saveSearchApiKey(apiKey: string): Promise<void> {
   await setProfileSecrets(SEARCH_SECRET_PROFILE_ID, { apiKey });
 }
@@ -302,7 +384,7 @@ export function getBuiltInTools(): UnifiedToolDefinition[] {
     {
       name: "request_user_input",
       description:
-        "Ask the user one to three structured questions when an important ambiguity must be resolved before proceeding.",
+        "Ask the user one to three structured questions when an important ambiguity or permission decision must be resolved before proceeding.",
       inputSchema: {
         type: "object",
         properties: {
@@ -337,6 +419,23 @@ export function getBuiltInTools(): UnifiedToolDefinition[] {
       },
     },
     {
+      name: "grant_permissions",
+      description:
+        "Record user-approved permission scopes for risky tools after request_user_input. Supports once, tool, shell-prefix, next-turn, session, and reset.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scope: {
+            type: "string",
+            enum: ["once", "tool", "shell-prefix", "next-turn", "session", "reset"],
+          },
+          tool: { type: "string" },
+          shellPrefix: { type: "string" },
+        },
+        required: ["scope"],
+      },
+    },
+    {
       name: "task_submit_plan",
       description:
         "Submit the proposed task plan for user approval before execution begins.",
@@ -368,7 +467,8 @@ export function getBuiltInTools(): UnifiedToolDefinition[] {
     },
     {
       name: "agent_spawn",
-      description: "Spawn a local sub-agent in background, worktree, or tmux mode.",
+      description:
+        "Spawn a local sub-agent in background, worktree, or tmux mode. Spawned agents run autonomously because they cannot ask the user for follow-up permissions directly.",
       inputSchema: {
         type: "object",
         properties: {
@@ -437,6 +537,18 @@ export async function executeToolCall(
   try {
     if (!isToolAvailableInContext(call.name, context)) {
       throw new Error(formatToolUnavailableMessage(call.name, context));
+    }
+
+    if (isApprovalRequiredTool(call.name)) {
+      const approvalRequest = buildToolApprovalRequest(call, input);
+      const autoApproved = consumeToolCallApproval(
+        context.permissions,
+        approvalRequest,
+      );
+
+      if (!autoApproved) {
+        return buildPermissionRequiredResult(approvalRequest);
+      }
     }
 
     switch (call.name) {
@@ -593,6 +705,115 @@ export async function executeToolCall(
             restartLoop: true,
           },
         };
+      }
+      case "grant_permissions": {
+        const state = requirePermissionState(context.permissions);
+        const rawScope = String(input.scope ?? "").trim().toLowerCase();
+        const tool = String(input.tool ?? "").trim();
+        const shellPrefix = String(input.shellPrefix ?? "").trim().toLowerCase();
+
+        switch (rawScope) {
+          case "once": {
+            if (shellPrefix) {
+              state.allowedOnceShellPrefixes.add(shellPrefix);
+              return {
+                output: serializeStructuredResult({
+                  status: "updated",
+                  scope: "once",
+                  tool: "shell",
+                  shell_prefix: shellPrefix,
+                  message: `Allowed shell prefix "${shellPrefix}" for one call.`,
+                }),
+              };
+            }
+
+            if (!tool || !isApprovalRequiredTool(tool)) {
+              throw new Error(
+                `scope "once" requires a risky tool name (${listApprovalRequiredTools().join(", ")}).`,
+              );
+            }
+
+            state.allowedOnceTools.add(tool);
+            return {
+              output: serializeStructuredResult({
+                status: "updated",
+                scope: "once",
+                tool,
+                message: `Allowed ${tool} for one call.`,
+              }),
+            };
+          }
+          case "tool": {
+            if (!tool || !isApprovalRequiredTool(tool)) {
+              throw new Error(
+                `scope "tool" requires a risky tool name (${listApprovalRequiredTools().join(", ")}).`,
+              );
+            }
+
+            state.allowedTools.add(tool);
+            return {
+              output: serializeStructuredResult({
+                status: "updated",
+                scope: "tool",
+                tool,
+                message: `Allowed ${tool} for this session.`,
+              }),
+            };
+          }
+          case "shell-prefix": {
+            if (!shellPrefix) {
+              throw new Error(
+                'scope "shell-prefix" requires shellPrefix, such as "mkdir".',
+              );
+            }
+
+            state.allowedShellPrefixes.add(shellPrefix);
+            return {
+              output: serializeStructuredResult({
+                status: "updated",
+                scope: "shell-prefix",
+                tool: "shell",
+                shell_prefix: shellPrefix,
+                message: `Allowed shell prefix "${shellPrefix}" for this session.`,
+              }),
+            };
+          }
+          case "next-turn": {
+            state.allowAllNextTurn = true;
+            return {
+              output: serializeStructuredResult({
+                status: "updated",
+                scope: "next-turn",
+                message: "Allowed all risky tools for the current turn.",
+              }),
+            };
+          }
+          case "session": {
+            state.allowAllSession = true;
+            state.allowAllNextTurn = false;
+            return {
+              output: serializeStructuredResult({
+                status: "updated",
+                scope: "session",
+                message: "Allowed all risky tools for this session.",
+              }),
+            };
+          }
+          case "reset": {
+            clearToolPermissionState(state);
+            return {
+              output: serializeStructuredResult({
+                status: "updated",
+                scope: "reset",
+                message: "Cleared all permission grants for this session.",
+              }),
+            };
+          }
+          default:
+            throw new Error(
+              'scope must be one of "once", "tool", "shell-prefix", "next-turn", "session", or "reset".',
+            );
+        }
       }
       case "task_submit_plan": {
         if (context.interactionMode !== "task" || !context.taskState) {

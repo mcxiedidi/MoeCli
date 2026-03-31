@@ -6,7 +6,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir, getAgentsDir, getWorktreesDir } from "../config/paths.js";
 import type { AgentExecutionMode } from "../providers/types.js";
 import type { InteractionMode } from "../cli/interactionMode.js";
@@ -67,8 +68,20 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function getSelfLaunchCommand(): { command: string; args: string[] } {
-  const distEntry = join(process.cwd(), "dist", "index.js");
+function getPackageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+}
+
+export function shouldDetachAgentProcess(
+  platform = process.platform,
+): boolean {
+  return platform !== "win32";
+}
+
+export function getSelfLaunchCommand(
+  packageRoot = getPackageRoot(),
+): { command: string; args: string[] } {
+  const distEntry = join(packageRoot, "dist", "index.js");
   if (existsSync(distEntry)) {
     return {
       command: process.execPath,
@@ -76,14 +89,22 @@ function getSelfLaunchCommand(): { command: string; args: string[] } {
     };
   }
 
+  const tsxLoader = join(packageRoot, "node_modules", "tsx", "dist", "loader.mjs");
+  if (existsSync(tsxLoader)) {
+    return {
+      command: process.execPath,
+      args: ["--import", tsxLoader, join(packageRoot, "src", "index.ts")],
+    };
+  }
+
   const tsxCommand =
     process.platform === "win32"
-      ? join(process.cwd(), "node_modules", ".bin", "tsx.cmd")
-      : join(process.cwd(), "node_modules", ".bin", "tsx");
+      ? join(packageRoot, "node_modules", ".bin", "tsx.cmd")
+      : join(packageRoot, "node_modules", ".bin", "tsx");
 
   return {
     command: tsxCommand,
-    args: [join(process.cwd(), "src", "index.ts")],
+    args: [join(packageRoot, "src", "index.ts")],
   };
 }
 
@@ -192,14 +213,15 @@ export class AgentManager {
       }).unref();
       record.tmuxSession = tmuxSession;
     } else {
+      const detached = shouldDetachAgentProcess();
       const child = spawn(launch.command, args, {
         cwd: resolvedCwd,
         env: {
           ...process.env,
         },
-        detached: true,
+        detached,
         stdio: "ignore",
-        windowsHide: true,
+        windowsHide: process.platform === "win32",
       });
       child.unref();
       record.pid = child.pid;

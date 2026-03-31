@@ -149,6 +149,27 @@ export function summarizeToolCall(call: UnifiedToolCall): string | undefined {
           return `plan="${truncatePlain(parsed.title, 52)}"`;
         }
         break;
+      case "grant_permissions": {
+        const scope =
+          typeof parsed.scope === "string" ? truncatePlain(parsed.scope, 24) : undefined;
+        const tool =
+          typeof parsed.tool === "string" ? truncatePlain(parsed.tool, 24) : undefined;
+        const shellPrefix =
+          typeof parsed.shellPrefix === "string"
+            ? truncatePlain(parsed.shellPrefix, 24)
+            : undefined;
+
+        if (scope && shellPrefix) {
+          return `${scope} ${shellPrefix}`;
+        }
+        if (scope && tool) {
+          return `${scope} ${tool}`;
+        }
+        if (scope) {
+          return scope;
+        }
+        break;
+      }
       default:
         break;
     }
@@ -167,6 +188,11 @@ export function summarizeToolResult(
   isError = false,
 ): string {
   const parsed = safeJsonParse<Record<string, unknown>>(output);
+  const status = typeof parsed?.status === "string" ? parsed.status : undefined;
+
+  if (status === "permission_required") {
+    return "permission required";
+  }
 
   if (call.name === "web_search") {
     const matchedTotalResults = Number(
@@ -191,7 +217,6 @@ export function summarizeToolResult(
   }
 
   if (call.name === "request_user_input") {
-    const status = typeof parsed?.status === "string" ? parsed.status : undefined;
     const answers = Array.isArray(parsed?.answers) ? parsed.answers.length : undefined;
     if (status === "cancelled") {
       return "user input cancelled";
@@ -202,7 +227,6 @@ export function summarizeToolResult(
   }
 
   if (call.name === "task_submit_plan") {
-    const status = typeof parsed?.status === "string" ? parsed.status : undefined;
     if (status === "approved") {
       return "plan approved";
     }
@@ -211,6 +235,12 @@ export function summarizeToolResult(
     }
     if (status === "cancelled") {
       return "task cancelled";
+    }
+  }
+
+  if (call.name === "grant_permissions") {
+    if (status === "updated") {
+      return "permissions updated";
     }
   }
 

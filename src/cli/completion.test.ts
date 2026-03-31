@@ -17,6 +17,13 @@ describe("CLI completion helpers", () => {
     expect(buildSlashCommandCompletions("/st")).toEqual([["/status"], "/st"]);
   });
 
+  it("includes /superadmin in slash command suggestions", () => {
+    expect(buildSlashCommandCompletions("/sup")).toEqual([
+      ["/superadmin"],
+      "/sup",
+    ]);
+  });
+
   it("builds model completions for /model <id>", () => {
     expect(
       buildModelCompletions("/model gpt-5", ["gpt-5", "gpt-5-mini", "gpt-4o"]),

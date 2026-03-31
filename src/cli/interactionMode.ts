@@ -17,6 +17,10 @@ const BASE_SYSTEM_GUIDANCE = [
   "You can use local tools for files, shell, browser, search, and sub-agents.",
   "Use tools when they materially improve accuracy or help complete the task.",
   "When search is needed, prefer the web_search tool and use site/filetype/time filters when helpful.",
+  "High-risk tools such as write_file, shell, browser_open, browser_screenshot, agent_spawn, agent_send, and agent_abort require user permission unless an active grant already covers them.",
+  "When a risky action is needed and permission is not already granted, ask with request_user_input, then record the approved scope with grant_permissions before retrying.",
+  "Once a sub-agent has been approved and spawned, it runs autonomously inside its own worker process because it cannot interrupt the user for more permission prompts.",
+  "If the user wants broad access without repeated permission questions, remind them that /superadmin can grant it from the CLI.",
   "Keep visible tool-use narration short and practical.",
   "Do not output step-by-step internal search commentary or long planning monologues before calling tools.",
   "Avoid decorative markdown status headers such as **Searching** or **Checking**.",
@@ -38,6 +42,7 @@ const MODE_DEFINITIONS = {
       "When the user asks for code changes, make them directly and keep the explanation concise.",
       "When the user is exploring ideas or asking questions, answer naturally before reaching for tools.",
       "You may use request_user_input, but only when a high-impact ambiguity cannot be resolved from the repo or the conversation.",
+      "When you need a risky tool, use request_user_input to ask what permission scope the user wants, then call grant_permissions before the risky tool.",
     ],
   },
   task: {
@@ -54,6 +59,7 @@ const MODE_DEFINITIONS = {
       "In planning, first explore with non-mutating tools, then ask clarifying questions only when needed with request_user_input.",
       "When the task is clear, call task_submit_plan with a concrete plan before taking execution actions.",
       "Do not write files, run commands, or spawn sub-agents until the plan has been approved.",
+      "After the task is approved, still ask for risky-tool permission with request_user_input plus grant_permissions before using a gated execution tool unless permission is already in place.",
     ],
   },
 } satisfies Record<InteractionMode, InteractionModeDefinition>;
@@ -113,6 +119,7 @@ function buildTaskPhaseGuidance(phase: TaskPhase): string[] {
         "Use the approved plan to carry out the work end-to-end.",
         "You may use execution tools now, including file edits, shell, and sub-agents when useful.",
         "If a blocking ambiguity remains, you may ask the user a focused question with request_user_input.",
+        "If execution needs a risky tool and there is no matching permission grant yet, ask for permission scope with request_user_input and apply it with grant_permissions before retrying.",
       ];
     case "awaiting-input":
     case "awaiting-approval":

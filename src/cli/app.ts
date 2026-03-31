@@ -78,6 +78,14 @@ import {
   findSelectedOption,
   type SelectOption,
 } from "./selectOptions.js";
+import {
+  createAutonomousToolPermissionState,
+  clearToolPermissionState,
+  createToolPermissionState,
+  getShellCommandPrefix,
+  listApprovalRequiredTools,
+  type ToolPermissionState,
+} from "../tools/permissions.js";
 
 interface RootOptions {
   profile?: string;
@@ -94,6 +102,7 @@ interface RuntimeContext {
   systemPromptBase?: string | undefined;
   browser: ReturnType<typeof getBrowserSession>;
   agents: AgentManager;
+  permissionState: ToolPermissionState;
   session: ChatSession;
 }
 
@@ -137,6 +146,54 @@ function printPanel(
   );
 }
 
+function getPermissionModeLabel(permissionState: ToolPermissionState): string {
+  if (permissionState.allowAllSession) {
+    return "all risky tools allowed for this session";
+  }
+  if (permissionState.allowAllNextTurn) {
+    return "all risky tools allowed for the next turn";
+  }
+  return "interactive approval";
+}
+
+function formatPermissionSummary(permissionState: ToolPermissionState): string[] {
+  const allowedTools = [...permissionState.allowedTools].sort();
+  const allowedShellPrefixes = [...permissionState.allowedShellPrefixes].sort();
+  const allowedOnceTools = [...permissionState.allowedOnceTools].sort();
+  const allowedOnceShellPrefixes = [
+    ...permissionState.allowedOnceShellPrefixes,
+  ].sort();
+
+  return [
+    ...renderKeyValueRows([
+      { label: "Approval mode", value: getPermissionModeLabel(permissionState) },
+      {
+        label: "Allowed tools",
+        value: allowedTools.length > 0 ? allowedTools.join(", ") : "none",
+      },
+      {
+        label: "Shell prefixes",
+        value:
+          allowedShellPrefixes.length > 0
+            ? allowedShellPrefixes.join(", ")
+            : "none",
+      },
+      {
+        label: "One-shot tools",
+        value:
+          allowedOnceTools.length > 0 ? allowedOnceTools.join(", ") : "none",
+      },
+      {
+        label: "One-shot prefixes",
+        value:
+          allowedOnceShellPrefixes.length > 0
+            ? allowedOnceShellPrefixes.join(", ")
+            : "none",
+      },
+    ]),
+  ];
+}
+
 function getTaskPhase(context: RuntimeContext): TaskPhase | undefined {
   return context.session.getTaskState()?.phase;
 }
@@ -170,6 +227,7 @@ function buildChatSession(
   systemPromptBase: string | undefined,
   browser = getBrowserSession(),
   agents = new AgentManager(),
+  permissionState = createToolPermissionState(),
   taskPhase?: TaskPhase,
   resetTaskPhaseOnUserTurn = true,
 ): ChatSession {
@@ -187,6 +245,7 @@ function buildChatSession(
       interactionMode,
       browser,
       agents,
+      permissions: permissionState,
     },
     ...(interactionMode === "task" && taskPhase
       ? {
@@ -235,7 +294,7 @@ function printSessionSummary(
   if (includeCommands) {
     stdout.write(
       `${theme.dim(
-        "Tab complete | Shift+Tab mode switch | /mode | /providers | /model <id>",
+        "Tab complete | Shift+Tab mode switch | /mode | /providers | /model <id> | /superadmin",
       )}\n`,
     );
     if (context.interactionMode === "task") {
@@ -256,7 +315,7 @@ function printHelpPanel(): void {
       "Core",
       ...renderCommandRows(
         SLASH_COMMANDS.filter((command) =>
-          ["/", "/help", "/status", "/clear", "/exit"].includes(command.command),
+          ["/", "/help", "/status", "/superadmin", "/clear", "/exit"].includes(command.command),
         ),
       ),
       "",
@@ -274,6 +333,10 @@ function printHelpPanel(): void {
       "OpenAI Compatible profiles may use auto, responses, or chat transport.",
       "Press Tab to complete slash commands and model ids after /model.",
       "Press Shift+Tab to cycle between Chat & Edit mode and Task mode.",
+      "High-risk tools such as shell, write_file, browser actions, and sub-agent actions are permission-gated.",
+      "The model should ask through request_user_input, then apply the result with grant_permissions.",
+      "Spawned sub-agents run autonomously after approval because they cannot open follow-up permission prompts.",
+      "Use /superadmin if you want broad one-turn, session-wide, or command-prefix exceptions.",
       "Task mode explores first, can ask you questions, then submits a plan for approval before execution.",
       "Browser, search, shell, files, and sub-agents are local features, not cloud-gated.",
     ],
@@ -314,6 +377,10 @@ function printStatusPanel(context: RuntimeContext): void {
           label: "Pending plan",
           value: taskState ? (taskState.pendingPlan ? "yes" : "no") : undefined,
         },
+        {
+          label: "Approval",
+          value: getPermissionModeLabel(context.permissionState),
+        },
         { label: "Auto-compact", value: autoCompactStatus },
         {
           label: "Messages",
@@ -338,6 +405,8 @@ function printStatusPanel(context: RuntimeContext): void {
         { label: "Profiles", value: settings.providerProfiles.length },
         { label: "Directory", value: context.cwd },
       ]),
+      "",
+      ...formatPermissionSummary(context.permissionState),
       "",
       mode.detail,
     ],
@@ -697,6 +766,116 @@ async function promptTaskPlanApprovalInteractive(
   }
 
   return { status: "approved" };
+}
+
+async function openSuperadminMenu(
+  context: RuntimeContext,
+  rl?: ReadlineInterface,
+): Promise<void> {
+  while (true) {
+    printPanel(
+      "Superadmin",
+      [
+        ...formatPermissionSummary(context.permissionState),
+        "",
+        "Grant broader approval exceptions when you trust the current session.",
+        "Normal risky actions should be approved through request_user_input plus grant_permissions.",
+      ],
+      "warning",
+    );
+
+    const action = await chooseOption(
+      "Superadmin action",
+      [
+        { label: "Allow all risky tools for next turn", value: "next-turn" },
+        { label: "Allow all risky tools for this session", value: "session" },
+        { label: "Allow a shell prefix for this session", value: "shell-prefix" },
+        { label: "Allow a tool for this session", value: "tool" },
+        { label: "Clear all approval grants", value: "clear" },
+        { label: "Back", value: "back" },
+      ],
+      "back",
+      rl,
+    );
+
+    if (!action || action === "back") {
+      return;
+    }
+
+    if (action === "next-turn") {
+      context.permissionState.allowAllNextTurn = true;
+      printPanel(
+        "Superadmin Updated",
+        ["All risky tools are allowed for the next user turn."],
+        "success",
+      );
+      continue;
+    }
+
+    if (action === "session") {
+      context.permissionState.allowAllSession = true;
+      context.permissionState.allowAllNextTurn = false;
+      printPanel(
+        "Superadmin Updated",
+        ["All risky tools are allowed for this session."],
+        "success",
+      );
+      continue;
+    }
+
+    if (action === "shell-prefix") {
+      const raw = await promptText(
+        "Shell command or prefix",
+        "",
+        rl,
+      );
+      const prefix = raw ? getShellCommandPrefix(raw) ?? raw.trim().toLowerCase() : undefined;
+      if (!prefix) {
+        printPanel(
+          "No Prefix Added",
+          ["No shell prefix was provided."],
+          "warning",
+        );
+        continue;
+      }
+      context.permissionState.allowedShellPrefixes.add(prefix);
+      printPanel(
+        "Superadmin Updated",
+        [`Allowed shell prefix: ${prefix}`],
+        "success",
+      );
+      continue;
+    }
+
+    if (action === "tool") {
+      const tool = await chooseOption(
+        "Choose a tool to allow",
+        listApprovalRequiredTools().map((toolName) => ({
+          label: toolName,
+          value: toolName,
+        })),
+        undefined,
+        rl,
+      );
+      if (!tool) {
+        continue;
+      }
+      context.permissionState.allowedTools.add(tool);
+      printPanel(
+        "Superadmin Updated",
+        [`Allowed tool for this session: ${tool}`],
+        "success",
+      );
+      continue;
+    }
+
+    clearToolPermissionState(context.permissionState);
+    printPanel(
+      "Superadmin Cleared",
+      ["All approval grants were removed. Risky tools now require approval again."],
+      "success",
+    );
+  }
 }
 
 async function chooseProviderKind(
@@ -1383,6 +1562,7 @@ async function ensureProfile(
 }
 
 function createInteractiveToolHandlers(
+  context: RuntimeContext,
   rl?: ReadlineInterface,
   renderer?: TurnRenderer,
 ): NonNullable<NonNullable<RuntimeContext["session"]["toolContext"]["interactive"]>> {
@@ -1418,6 +1598,7 @@ async function runChatTurn(
 
   try {
     context.session.toolContext.interactive = createInteractiveToolHandlers(
+      context,
       rl,
       renderer,
     );
@@ -1432,6 +1613,9 @@ async function runChatTurn(
     return collectText(result.assistantMessage.parts);
   } finally {
     delete context.session.toolContext.interactive;
+    if (context.permissionState.allowAllNextTurn) {
+      context.permissionState.allowAllNextTurn = false;
+    }
     renderer?.close();
   }
 }
@@ -1456,6 +1640,7 @@ async function rebuildContext(
       current.systemPromptBase,
       current.browser,
       current.agents,
+      current.permissionState,
     ),
   };
 }
@@ -1492,6 +1677,7 @@ async function handleSlashCommand(
           context.systemPromptBase,
           context.browser,
           context.agents,
+          context.permissionState,
         ),
       };
     }
@@ -1528,6 +1714,7 @@ async function handleSlashCommand(
           context.systemPromptBase,
           context.browser,
           context.agents,
+          context.permissionState,
         ),
       };
     }
@@ -1575,6 +1762,9 @@ async function handleSlashCommand(
       );
       return next;
     }
+    case "/superadmin":
+      await openSuperadminMenu(context, rl);
+      return context;
     case "/config":
       await openConfigMenu(rl);
       return context;
@@ -1597,6 +1787,7 @@ async function handleSlashCommand(
           context.systemPromptBase,
           context.browser,
           context.agents,
+          context.permissionState,
         ),
       };
     case "/exit":
@@ -1738,6 +1929,7 @@ async function runAgentWorker(agentId: string): Promise<void> {
       undefined,
       browser,
       agents,
+      createAutonomousToolPermissionState(),
       record.taskPhase ?? "executing",
       false,
     );
@@ -1792,6 +1984,7 @@ async function runRootAction(
   }
   const interactionMode = requestedMode ?? DEFAULT_INTERACTION_MODE;
   const systemPromptBase = options.system?.trim() || undefined;
+  const permissionState = createToolPermissionState();
   const context: RuntimeContext = {
     cwd: processCwd(),
     profile,
@@ -1800,6 +1993,7 @@ async function runRootAction(
     systemPromptBase,
     browser,
     agents,
+    permissionState,
     session: buildChatSession(
       profile,
       model,
@@ -1808,6 +2002,7 @@ async function runRootAction(
       systemPromptBase,
       browser,
       agents,
+      permissionState,
     ),
   };
 

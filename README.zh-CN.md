@@ -4,26 +4,31 @@
 
 [English README](./README.md)
 
-MoeCli 是一个运行在终端里的多 Provider 编码助手，保留了现代 coding agent 工作流里最有价值的能力：流式对话、本地工具、浏览器集成、搜索、任务规划、子 Agent，以及长会话自动压缩。
+MoeCli 这个名字就很直接。
 
-如果你想要一个类似 Codex / Claude Code 风格的本地 CLI，但又不想被单一厂商绑定，MoeCli 就是为这种场景设计的。
+之所以叫做 **MoeCli**，当然是因为喵喵很可爱 `awa`。
 
-## 亮点
+它是一个运行在终端里的多 Provider 编码助手，尽量保留了现代 coding agent 工作流里好用的那部分能力：流式对话、本地工具、浏览器集成、搜索、任务规划、子 Agent，以及长会话自动压缩。
+
+如果你喜欢 Codex / Claude Code 这一类本地 CLI 的使用方式，但又不想被单一厂商绑定，MoeCli 就是为这种场景设计的。
+
+## 特性简介
 
 - 粉色主题终端界面，支持流式输出和工具活动展示
-- 原生支持多 Provider，不绑定单一模型厂商
-- 支持聊天模式与任务模式，并可快捷切换
+- 原生支持多 Provider，不锁定单一模型厂商
+- 内置搜索接口，默认可接入公益搜索接口，也支持自行配置
+- 支持聊天模式和任务模式，交互逻辑和主流 coding CLI 接近
 - 内置本地文件、Shell、浏览器、搜索、子 Agent 工具
-- 长会话自动压缩上下文，避免聊久了直接报错
+- 长会话会自动压缩上下文，避免聊久了直接因为上下文过大而中断
 - 支持本地 Provider Profile 与密钥存储
-- 支持从 Provider 拉取模型列表，拉不到时可手动输入
+- 支持从 Provider 拉取模型列表，拉不到时也可以手动输入模型 ID
 
-## 支持的 Provider
+## 支持的 AI 接口
 
 | Provider | 状态 | 说明 |
 | --- | --- | --- |
 | OpenAI Responses | 已支持 | 原生 Responses API |
-| OpenAI Compatible | 已支持 | 优先 Responses，失败回退 Chat |
+| OpenAI Compatible | 已支持 | 优先尝试 Responses，失败自动回退 Chat |
 | Anthropic | 已支持 | Messages API |
 | Amazon Bedrock | 已支持 | Converse / ConverseStream 风格接入 |
 | Google Gemini | 已支持 | Gemini API 接入 |
@@ -92,6 +97,8 @@ Shift+Tab
 
 ## 交互模式
 
+MoeCli 的交互模式和大众常见的 coding CLI 基本一致，主要分成两种：
+
 ### Chat & Edit
 
 适合：
@@ -118,9 +125,27 @@ Task 模式的设计目标是：
 4. 等待批准
 5. 批准后执行
 
+## 搜索接口
+
+MoeCli 内置了搜索能力，默认可以接入网上的公益搜索接口，也支持用户通过配置面板自行替换成自己的搜索服务。
+
+你可以在这里配置：
+
+```text
+/config
+```
+
+通常可以配置这些内容：
+
+- 搜索接口地址
+- 认证 Header 名称
+- 认证 Header 前缀
+- API Key
+- 默认 site / filetype / sort / time range
+
 ## 内置工具
 
-MoeCli 使用本地工具层，而不是依赖厂商特有的云端能力。
+MoeCli 使用的是本地工具层，而不是依赖厂商特有的云端能力。
 
 ### 核心工具
 
@@ -162,24 +187,6 @@ MoeCli 使用本地工具层，而不是依赖厂商特有的云端能力。
 | `/browser` | 查看本地浏览器集成状态 |
 | `/clear` | 开启一个全新的会话 |
 | `/exit` | 退出 MoeCli |
-
-## 搜索集成
-
-MoeCli 支持可配置的实时搜索接口。
-
-你可以在这里配置：
-
-```text
-/config
-```
-
-典型配置包括：
-
-- Endpoint URL
-- 鉴权 Header 名
-- 鉴权 Header 前缀
-- API Key
-- 默认 site / filetype / sort / time range
 
 ## 上下文自动压缩
 
