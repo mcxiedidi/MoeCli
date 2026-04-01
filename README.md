@@ -266,3 +266,8 @@ MoeCli aims to be a practical local coding CLI that is:
 - friendly to long-running engineering work
 
 If you like terminal coding agents but want more control over providers and local workflows, MoeCli is built for that.
+
+## Thanks
+
+[Linux.Do](https://linux.do)
+[MoeTan](https://moetan.org)
