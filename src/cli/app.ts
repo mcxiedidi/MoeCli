@@ -37,7 +37,7 @@ import type {
   UnifiedStreamEvent,
 } from "../providers/types.js";
 import { getProviderAdapter, listProviderAdapters } from "../providers/index.js";
-import { getBuiltInTools, saveSearchApiKey } from "../tools/registry.js";
+import { getBuiltInTools, saveSearchApiKey, saveTavilyApiKey } from "../tools/registry.js";
 import { getBrowserSession } from "../browser/session.js";
 import { AgentManager } from "../agents/manager.js";
 import { ChatSession } from "../session/chatSession.js";
@@ -399,7 +399,9 @@ function printStatusPanel(context: RuntimeContext): void {
         },
         {
           label: "Search",
-          value: settings.search.enabled ? settings.search.endpoint : "disabled",
+          value: settings.search.enabled
+            ? `${settings.search.provider === "tavily" ? "tavily" : settings.search.endpoint}`
+            : "disabled",
         },
         { label: "Agent mode", value: settings.agents.defaultMode },
         { label: "Profiles", value: settings.providerProfiles.length },
@@ -1426,7 +1428,8 @@ async function openConfigMenu(rl?: ReadlineInterface): Promise<void> {
       [
         ...renderKeyValueRows([
           { label: "Browser", value: settings.browser.enabled ? "enabled" : "disabled" },
-          { label: "Search endpoint", value: settings.search.endpoint },
+          { label: "Search provider", value: settings.search.provider },
+          { label: "Search endpoint", value: settings.search.provider === "tavily" ? "https://api.tavily.com/search" : settings.search.endpoint },
           { label: "Agent mode", value: settings.agents.defaultMode },
         ]),
       ],
@@ -1461,35 +1464,62 @@ async function openConfigMenu(rl?: ReadlineInterface): Promise<void> {
     }
 
     if (action === "search") {
-      const endpoint = await promptText(
-        "Search endpoint",
-        settings.search.endpoint,
+      const provider = await chooseOption(
+        "Search provider",
+        [
+          { label: "Custom (uapis.cn)", value: "custom" },
+          { label: "Tavily", value: "tavily" },
+        ],
+        settings.search.provider,
         rl,
       );
-      const headerName = await promptText(
-        "Header name",
-        settings.search.headerName,
-        rl,
-      );
-      const headerPrefix = await promptText(
-        "Header prefix",
-        settings.search.headerPrefix,
-        rl,
-      );
-      const apiKey = await promptText("Search API key (optional)", "", rl);
 
-      updateSettings((current) => ({
-        ...current,
-        search: {
-          ...current.search,
-          ...(endpoint ? { endpoint } : {}),
-          ...(headerName ? { headerName } : {}),
-          ...(headerPrefix !== undefined ? { headerPrefix } : {}),
-        },
-      }));
+      if (provider === "tavily") {
+        const apiKey = await promptText("Tavily API key (optional)", "", rl);
 
-      if (apiKey) {
-        await saveSearchApiKey(apiKey);
+        updateSettings((current) => ({
+          ...current,
+          search: {
+            ...current.search,
+            provider: "tavily" as const,
+          },
+        }));
+
+        if (apiKey) {
+          await saveTavilyApiKey(apiKey);
+        }
+      } else {
+        const endpoint = await promptText(
+          "Search endpoint",
+          settings.search.endpoint,
+          rl,
+        );
+        const headerName = await promptText(
+          "Header name",
+          settings.search.headerName,
+          rl,
+        );
+        const headerPrefix = await promptText(
+          "Header prefix",
+          settings.search.headerPrefix,
+          rl,
+        );
+        const apiKey = await promptText("Search API key (optional)", "", rl);
+
+        updateSettings((current) => ({
+          ...current,
+          search: {
+            ...current.search,
+            provider: "custom" as const,
+            ...(endpoint ? { endpoint } : {}),
+            ...(headerName ? { headerName } : {}),
+            ...(headerPrefix !== undefined ? { headerPrefix } : {}),
+          },
+        }));
+
+        if (apiKey) {
+          await saveSearchApiKey(apiKey);
+        }
       }
       continue;
     }

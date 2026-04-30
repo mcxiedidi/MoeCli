@@ -73,6 +73,7 @@ export const AppSettingsSchema = z.object({
   search: z
     .object({
       enabled: z.boolean().default(true),
+      provider: z.enum(["custom", "tavily"]).default("custom"),
       endpoint: z
         .string()
         .default("https://uapis.cn/api/v1/search/aggregate"),
@@ -91,6 +92,7 @@ export const AppSettingsSchema = z.object({
     })
     .default({
       enabled: true,
+      provider: "custom",
       endpoint: "https://uapis.cn/api/v1/search/aggregate",
       headerName: "Authorization",
       headerPrefix: "Bearer ",
