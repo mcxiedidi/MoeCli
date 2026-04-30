@@ -41,6 +41,7 @@ import {
 
 const execAsync = promisify(exec);
 const SEARCH_SECRET_PROFILE_ID = "__moecli_search__";
+const TAVILY_SECRET_PROFILE_ID = "__moecli_tavily__";
 const PLANNING_TOOL_NAMES = new Set([
   "read_file",
   "list_files",
@@ -118,11 +119,8 @@ function listDirectory(
   return output;
 }
 
-async function runSearchRequest(payload: Record<string, unknown>): Promise<string> {
+async function runCustomSearchRequest(payload: Record<string, unknown>): Promise<string> {
   const settings = getSettings().search;
-  if (!settings.enabled) {
-    throw new Error("Search integration is disabled.");
-  }
 
   const searchSecrets = await getProfileSecrets(SEARCH_SECRET_PROFILE_ID);
   const apiKey = searchSecrets.apiKey?.trim() || process.env.MOECLI_SEARCH_API_KEY;
@@ -146,6 +144,56 @@ async function runSearchRequest(payload: Record<string, unknown>): Promise<strin
   }
 
   return truncate(text);
+}
+
+async function runTavilySearchRequest(payload: Record<string, unknown>): Promise<string> {
+  const tavilySecrets = await getProfileSecrets(TAVILY_SECRET_PROFILE_ID);
+  const apiKey = tavilySecrets.apiKey?.trim() || process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "Tavily API key is not configured. Set TAVILY_API_KEY or configure it in search settings.",
+    );
+  }
+
+  const searchDepth =
+    payload.fetch_full === true ? "advanced" : "basic";
+
+  const tavilyBody: Record<string, unknown> = {
+    api_key: apiKey,
+    query: String(payload.query ?? ""),
+    search_depth: searchDepth,
+    max_results: 10,
+    ...(payload.time_range ? { time_range: String(payload.time_range) } : {}),
+    ...(payload.site
+      ? { include_domains: [String(payload.site)] }
+      : {}),
+  };
+
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(tavilyBody),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(text);
+  }
+
+  return truncate(text);
+}
+
+async function runSearchRequest(payload: Record<string, unknown>): Promise<string> {
+  const settings = getSettings().search;
+  if (!settings.enabled) {
+    throw new Error("Search integration is disabled.");
+  }
+
+  if (settings.provider === "tavily") {
+    return runTavilySearchRequest(payload);
+  }
+
+  return runCustomSearchRequest(payload);
 }
 
 function isToolAvailableInContext(
@@ -268,6 +316,10 @@ function requirePermissionState(
 
 export async function saveSearchApiKey(apiKey: string): Promise<void> {
   await setProfileSecrets(SEARCH_SECRET_PROFILE_ID, { apiKey });
+}
+
+export async function saveTavilyApiKey(apiKey: string): Promise<void> {
+  await setProfileSecrets(TAVILY_SECRET_PROFILE_ID, { apiKey });
 }
 
 export function getBuiltInTools(): UnifiedToolDefinition[] {
