@@ -72,6 +72,7 @@ export const AppSettingsSchema = z.object({
     .default({ enabled: true }),
   search: z
     .object({
+      provider: z.enum(["custom", "parallel"]).default("custom"),
       enabled: z.boolean().default(true),
       endpoint: z
         .string()
@@ -90,6 +91,7 @@ export const AppSettingsSchema = z.object({
         .default("https://uapis.cn/docs/api-reference/post-search-aggregate"),
     })
     .default({
+      provider: "custom",
       enabled: true,
       endpoint: "https://uapis.cn/api/v1/search/aggregate",
       headerName: "Authorization",

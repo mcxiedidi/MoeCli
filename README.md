@@ -165,7 +165,22 @@ MoeCli includes a local tool layer instead of relying on cloud-only features.
 
 ## Search Integration
 
-MoeCli supports a configurable search endpoint for real-time web search.
+MoeCli supports a configurable search endpoint for real-time web search. The
+existing UAPI endpoint remains the default.
+
+For free web search with [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp),
+open `/config`, choose **Search settings**, then **Parallel (free, no API key)**.
+Search uses Fast mode without a Parallel account or API key. Anonymous use has
+rate limits. Your custom endpoint and credentials stay saved, and you can switch
+back to **Custom endpoint** at any time. Keys for the custom endpoint are never
+sent to Parallel; provider errors do not trigger a fallback.
+
+The agent continues to use `web_search`. With Parallel, `site` and `filetype` are
+added to the query as search operators, and `fetch_full: true` also reads up to
+three result pages. Date sorting and `time_range` filters require **Custom
+endpoint**; Parallel reports an error for those options, including saved defaults.
+Search requests to Parallel have a 30-second timeout. Setting `search.enabled` to
+`false` in `~/.moecli/settings.json` disables either provider.
 
 You can configure search inside:
 
@@ -173,7 +188,7 @@ You can configure search inside:
 /config
 ```
 
-Typical settings include:
+Custom endpoint settings include:
 
 - endpoint URL
 - auth header name

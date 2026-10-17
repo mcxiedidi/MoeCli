@@ -650,7 +650,11 @@ export class ChatSession {
           });
         }
 
-        const toolResult = await executeToolCall(toolCall, this.toolContext);
+        const toolResult = await executeToolCall(toolCall, {
+          ...this.toolContext,
+          sessionId: this.sessionId,
+          model: this.model,
+        });
         if (onEvent) {
           await onEvent({
             type: "tool-result",

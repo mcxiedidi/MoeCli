@@ -129,13 +129,26 @@ Task 模式的设计目标是：
 
 MoeCli 内置了搜索能力，默认可以接入网上的公益搜索接口，也支持用户通过配置面板自行替换成自己的搜索服务。
 
+现有 UAPI 接口仍为默认选项。要使用免费的
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)，
+在 `/config` 中选择 **Search settings**，然后选择 **Parallel (free, no API key)**。
+搜索使用 Fast 模式，无需 Parallel 账号或 API Key；匿名使用有频率限制。
+自定义接口地址和密钥会保留，可随时切回 **Custom endpoint**。
+自定义接口的密钥不会发送给 Parallel，搜索失败时也不会自动切换服务。
+
+Agent 仍通过 `web_search` 调用搜索。Parallel 会把 `site` 和 `filetype`
+作为搜索操作符附加到查询中；`fetch_full: true` 会额外读取最多三个结果页面。
+按日期排序和 `time_range` 筛选需要使用 **Custom endpoint**；Parallel 会对这些选项
+（包括已保存的默认值）返回明确错误。Parallel 请求的总超时为 30 秒。
+在 `~/.moecli/settings.json` 中设置 `search.enabled: false` 可禁用任一搜索服务。
+
 你可以在这里配置：
 
 ```text
 /config
 ```
 
-通常可以配置这些内容：
+自定义接口通常可以配置这些内容：
 
 - 搜索接口地址
 - 认证 Header 名称

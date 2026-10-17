@@ -399,7 +399,11 @@ function printStatusPanel(context: RuntimeContext): void {
         },
         {
           label: "Search",
-          value: settings.search.enabled ? settings.search.endpoint : "disabled",
+          value: settings.search.enabled
+            ? settings.search.provider === "parallel"
+              ? "Parallel"
+              : settings.search.endpoint
+            : "disabled",
         },
         { label: "Agent mode", value: settings.agents.defaultMode },
         { label: "Profiles", value: settings.providerProfiles.length },
@@ -1426,7 +1430,12 @@ async function openConfigMenu(rl?: ReadlineInterface): Promise<void> {
       [
         ...renderKeyValueRows([
           { label: "Browser", value: settings.browser.enabled ? "enabled" : "disabled" },
-          { label: "Search endpoint", value: settings.search.endpoint },
+          {
+            label: "Search provider",
+            value: settings.search.provider === "parallel"
+              ? "Parallel"
+              : settings.search.endpoint,
+          },
           { label: "Agent mode", value: settings.agents.defaultMode },
         ]),
       ],
@@ -1461,6 +1470,25 @@ async function openConfigMenu(rl?: ReadlineInterface): Promise<void> {
     }
 
     if (action === "search") {
+      const provider = await chooseOption(
+        "Search provider",
+        [
+          { label: "Custom endpoint", value: "custom" as const },
+          { label: "Parallel (free, no API key)", value: "parallel" as const },
+        ],
+        settings.search.provider,
+        rl,
+      );
+      if (!provider) {
+        continue;
+      }
+      if (provider === "parallel") {
+        updateSettings((current) => ({
+          ...current,
+          search: { ...current.search, provider },
+        }));
+        continue;
+      }
       const endpoint = await promptText(
         "Search endpoint",
         settings.search.endpoint,
@@ -1482,6 +1510,7 @@ async function openConfigMenu(rl?: ReadlineInterface): Promise<void> {
         ...current,
         search: {
           ...current.search,
+          provider,
           ...(endpoint ? { endpoint } : {}),
           ...(headerName ? { headerName } : {}),
           ...(headerPrefix !== undefined ? { headerPrefix } : {}),

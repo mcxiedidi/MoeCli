@@ -29,6 +29,7 @@ import { getSettings } from "../config/settings.js";
 import { getProfileSecrets, setProfileSecrets } from "../config/secrets.js";
 import { BrowserSession } from "../browser/session.js";
 import { AgentManager } from "../agents/manager.js";
+import { runParallelSearch } from "./parallelSearch.js";
 import {
   buildToolApprovalRequest,
   clearToolPermissionState,
@@ -58,6 +59,8 @@ export interface ToolExecutionContext {
   cwd: string;
   profile: ResolvedProviderProfile;
   model: string;
+  sessionId?: string | undefined;
+  signal?: AbortSignal | undefined;
   interactionMode: InteractionMode;
   taskState?: TaskModeState | undefined;
   browser: BrowserSession;
@@ -118,10 +121,17 @@ function listDirectory(
   return output;
 }
 
-async function runSearchRequest(payload: Record<string, unknown>): Promise<string> {
+async function runSearchRequest(
+  payload: Record<string, unknown>,
+  context: ToolExecutionContext,
+): Promise<string> {
   const settings = getSettings().search;
   if (!settings.enabled) {
     throw new Error("Search integration is disabled.");
+  }
+
+  if (settings.provider === "parallel") {
+    return truncate(await runParallelSearch(payload, context));
   }
 
   const searchSecrets = await getProfileSecrets(SEARCH_SECRET_PROFILE_ID);
@@ -325,7 +335,7 @@ export function getBuiltInTools(): UnifiedToolDefinition[] {
     {
       name: "web_search",
       description:
-        "Search the web with the configured search endpoint. Supports site, filetype, sort, and time_range filters.",
+        "Search the web with the selected search provider. Parallel supports site and filetype query operators; sort=date and time_range require the custom provider. With Parallel, fetch_full reads up to three result pages.",
       inputSchema: {
         type: "object",
         properties: {
@@ -637,7 +647,7 @@ export async function executeToolCall(
               : {}),
         };
         return {
-          output: await runSearchRequest(payload),
+          output: await runSearchRequest(payload, context),
         };
       }
       case "browser_status": {
